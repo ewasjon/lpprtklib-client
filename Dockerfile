@@ -1,6 +1,8 @@
 ARG LPP_VERSION=v4.0.1
 
-FROM ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS builder
+FROM ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS lpp_builder
+
+FROM ghcr.io/rtklibexplorer/rtklib:demo5_b34g AS rtklib_builder
 
 FROM python:3-slim-bookworm
 
@@ -12,9 +14,11 @@ RUN apt-get update && apt-get install -y libssl-dev tini supervisor && rm -rf /v
 RUN pip install --no-cache-dir tornado
 
 RUN mkdir /lpp-client
-COPY --from=builder /app/docker_build/example-* /lpp-client/
+COPY --from=lpp_builder /app/docker_build/example-* /lpp-client/
+COPY --from=rtklib_builder /RTKLIB/bin/* /usr/local/bin/
 
 COPY ./*.py /lpp-client/
+COPY ./rtklib.conf /lpp-client/
 COPY ./views /lpp-client/views
 RUN mkdir /lpp-client/log
 

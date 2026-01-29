@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        version: ["v3.4.17", "v4.0.22"] # CHANGE THIS TO MATCH THE VERSIONS YOU WANT TO BUILD
+        version: ["v4.0.22"] # Only v4 is supported
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: write

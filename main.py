@@ -255,50 +255,6 @@ def get_cmd_params():
         "log_nmea": log_nmea,
     }
 
-def build_v3_command(params, cellular):
-    """Build command for v3 example-lpp client"""
-    app_path = "./example-lpp"
-    format = "osr"
-    additional_flags = []
-    if params["format"] == "osr":
-        format = "osr"
-        if params["forwarding"]:
-            additional_flags =["format=lrf-uper"]
-    else:
-        format = "ssr"
-        if params["forwarding"]:
-            additional_flags =["format=lrf-uper"]
-        else:
-            additional_flags =["format=spartn"]
-
-    additional_flags = params["flags"].replace(',', ' ').split()
-    additional_flags = ' '.join(f"--{flag.lstrip('-')}" for flag in additional_flags)
-
-    msisdn_or_imsi = f"--msisdn {cellular['mdn']}" if cellular.get('mdn') else f"--imsi {cellular['imsi']}"
-    
-    if params["output"].startswith("un"):
-        output_param = "--nmea-export-un=/tmp/nmea.sock"
-    else:
-        ip, port = params['output'].split(':')
-        output_param = f"--nmea-export-tcp={ip} --nmea-export-tcp-port={port}"
-    
-    cmd = (
-        f"{app_path} {format} "
-        f"--prm {additional_flags} "
-        f"-h {params['host']} "
-        f"--port {params['port']} "
-        f"-c {params['starting_mcc'] or cellular['mcc']} "
-        f"-n {params['starting_mnc'] or cellular['mnc']} "
-        f"-t {params['starting_tac'] or cellular['tac']} "
-        f"-i {params['starting_cell_id'] or cellular['cell_id']} "
-        f"{msisdn_or_imsi} "
-        f"--nmea-serial {params['serial']} "
-        f"--nmea-serial-baud {params['baud']} "
-        f"--ctrl-stdin {output_param}"
-    )
-    
-    return cmd
-
 def build_v4_command(params, cellular):
     """Build command for v4 example-client"""
     app_path = "./example-client"
@@ -310,39 +266,10 @@ def build_v4_command(params, cellular):
     tokoro_flags = params["tokoro_flags"].replace(', ', ' ').split()
     tokoro_flags = ' '.join(f"--{flag.lstrip('-')}" for flag in tokoro_flags)
 
-    spartn_flags = params["spartn_flags"].replace(', ', ' ').split()
-    spartn_flags = ' '.join(f"--{flag.lstrip('-')}" for flag in spartn_flags)
-
-    # Determine processors based on format
-    processors = []
-    ad_type = "--ad-type=osr"
-    output_format = "rtcm"
-    if params["format"] == "osr" or params["format"] == "lpp2rtcm":
-        ad_type = "--ad-type=osr"
-        output_format = "rtcm"
-        processors.append("--lpp2rtcm")
-    elif params["format"] == "lpp2spartn":
-        ad_type = "--ad-type=ssr"
-        output_format = "spartn"
-        processors.append("--lpp2spartn")
-        additional_flags += " " + spartn_flags
-    elif params["format"] == "tokoro":
-        ad_type = "--ad-type=ssr"
-        processors.append("--tokoro")
-        additional_flags += " " + tokoro_flags
-    elif params["format"] == "osr-lfr":
-        ad_type = "--ad-type=osr"
-        output_format = "lrf"
-        processors.append("--lpp2fr")
-    elif params["format"] == "ssr-lfr":
-        ad_type = "--ad-type=ssr"
-        output_format = "lrf"
-        processors.append("--lpp2fr")
-    else:
-        logger.error(f"unknown format: {params['format']}")
-        ad_type = "--ad-type=osr"
-        output_format = "rtcm"
-        processors.append("--lpp2rtcm")
+    # Use tokoro format
+    ad_type = "--ad-type=ssr"
+    processors = ["--tokoro"]
+    additional_flags += " " + tokoro_flags
     
     # Identity specification
     identity_param = ""
@@ -353,9 +280,14 @@ def build_v4_command(params, cellular):
     
     # Input/Output configuration
     input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
-    output_param = f"--output serial:device={params['serial']},baudrate={params['baud']},format={output_format}"
     
-    # Output configuration
+    # Send raw GNSS observations (UBX) to RTKLIB and RTCM corrections to both serial and RTKLIB
+    rtklib_obs_output = "--output tcp-server:port=20000,format=ubx"
+    rtklib_rtcm_output = "--output tcp-server:port=5432,format=rtcm"
+    rtklib_nmea_input = "--input tcp-client:host=localhost,port=5433,format=nmea"
+    serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
+    
+    # Output configuration for CS path
     if params["output"].startswith("un"):
         export_param = "--output tcp-client:path=/tmp/nmea.sock,format=nmea"
     elif params["output"].startswith("tcp-server:"):
@@ -383,7 +315,10 @@ def build_v4_command(params, cellular):
         f"{'--nr-cell ' if cellular['nr'] else ''}"
         f"{identity_param} "
         f"{input_param} "
-        f"{output_param} "
+        f"{serial_rtcm_output} "
+        f"{rtklib_obs_output} "
+        f"{rtklib_rtcm_output} "
+        f"{rtklib_nmea_input} "
         f"{export_param} "
         f"{control_param} "
         f"{ad_type} "
@@ -392,7 +327,7 @@ def build_v4_command(params, cellular):
     return cmd
 
 def main():
-    logger.info("Starting lpp client")
+    logger.info("Starting lpp client and RTKLIB")
 
     params = get_cmd_params()
     cellular = get_cellular_info()
@@ -414,35 +349,31 @@ def main():
             tcp_thread.daemon = True
             tcp_thread.start()
 
-    # Determine which client to use
-    lpp_client_version = os.environ.get('LPP_VERSION', 'v3.0.0')
-    major_version = int(lpp_client_version.lstrip('v').split('.')[0])
-    use_v4_client = major_version >= 4
-    logger.info(f"-->{major_version} {major_version} {lpp_client_version}")
-    
-    if use_v4_client:
-        logger.info("Using v4 client (example-client)")
-        cmd = build_v4_command(params, cellular)
-    else:
-        logger.info("Using v3 client (example-lpp)")
-        cmd = build_v3_command(params, cellular)
+    logger.info("Using v4 client (example-client)")
+    cmd = build_v4_command(params, cellular)
     
     logger.info(cmd)
-    program = RunProgram(cmd)
+    lpp_program = RunProgram(cmd)
+
+    # Start RTKLIB rtkrcv with config file
+    rtklib_cmd = "rtkrcv -o /lpp-client/rtklib.conf"
+    logger.info(f"RTKLIB command: {rtklib_cmd}")
+    rtklib_program = RunProgram(rtklib_cmd)
 
     # Create a control thread to handle user input (e.g., stopping the program)
-    def control_thread(program, current_params, current_cellular):
+    def control_thread(lpp_program, rtklib_program, current_params, current_cellular):
         logger.info("Periodically checking for changes")
         while True:
             time.sleep(10)
-            if program.process is None:
+            if lpp_program.process is None or rtklib_program.process is None:
                 logger.info("Program terminated")
                 break
             new_params = get_cmd_params()
             if new_params != current_params:
                 current_params = new_params
                 logger.info("params changed", current_params)
-                program.interrupt() # Terminate the external program
+                lpp_program.interrupt()
+                rtklib_program.quit()
                 break
             new_cellular = get_cellular_info()
             logger.info(f"cell check: {new_cellular['mnc']},{new_cellular['mcc']},{new_cellular['tac']},{new_cellular['cell_id']},{new_cellular["nr"]} == {current_cellular['mnc']},{current_cellular['mcc']},{current_cellular['tac']},{current_cellular['cell_id']},{current_cellular["nr"]}")
@@ -453,13 +384,18 @@ def main():
                     cmd = f"/CID,N,{current_cellular['mcc']},{current_cellular['mnc']},{current_cellular['tac']},{current_cellular['cell_id']}\r\n"
                 else:
                     cmd = f"/CID,L,{current_cellular['mcc']},{current_cellular['mnc']},{current_cellular['tac']},{current_cellular['cell_id']}\r\n"
-                program.write(cmd)
+                lpp_program.write(cmd)
 
-    ct = threading.Thread(target=control_thread, args=(program,params,cellular))
+    ct = threading.Thread(target=control_thread, args=(lpp_program,rtklib_program,params,cellular))
     ct.daemon = True
     ct.start()
 
-    program.start()
+    # Start both programs
+    lpp_thread = threading.Thread(target=lpp_program.start)
+    lpp_thread.start()
+    
+    rtklib_thread = threading.Thread(target=rtklib_program.start)
+    rtklib_thread.start()
 
     ct.join()
 
