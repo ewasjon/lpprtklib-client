@@ -15,7 +15,7 @@ version: '2.4'
 services:
   lpp:
     network_mode: bridge
-    image: ghcr.io/dapplegatecp/lpp-client
+    image: ghcr.io/ewasjon/lpprtklib-client
     restart: unless-stopped
     environment:
       - WEBAPP=true
@@ -117,7 +117,7 @@ docker build --platform=linux/arm64 -t lpp-client .
 The lpp-client.tar.gz SDK version can be downloaded from the releases page. It can also be retrieved from the container image itself. Pay special care to run the correct platform (linux/arm64):
 
 ```bash
-docker run --platform=linux/arm64 --rm ghcr.io/dapplegatecp/lpp-client:latest cat /lpp-client.tar.gz > lpp-client.tar.gz
+docker run --platform=linux/arm64 --rm ghcr.io/ewasjon/lpprtklib-client:latest cat /lpp-client.tar.gz > lpp-client.tar.gz
 ```
 
 For more information on running SDK apps on Cradlepoint endpoints see the [SDK documentation](https://docs.cradlepoint.com/r/NetCloud-Manager-Tools-Tab/SDK).
