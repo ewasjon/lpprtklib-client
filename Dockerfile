@@ -1,8 +1,12 @@
-ARG LPP_VERSION=v4.0.1
+ARG LPP_VERSION=v4.0.22
 
 FROM ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS lpp_builder
 
-FROM ghcr.io/rtklibexplorer/rtklib:demo5_b34g AS rtklib_builder
+FROM debian:bookworm-slim AS rtklib_builder
+RUN apt-get update && apt-get install -y git cmake build-essential liblapack-dev libblas-dev && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/rtklibexplorer/RTKLIB.git /RTKLIB
+WORKDIR /RTKLIB
+RUN mkdir build && cd build && cmake -DBUILD_TEST=OFF .. && make
 
 FROM python:3-slim-bookworm
 
@@ -15,7 +19,8 @@ RUN pip install --no-cache-dir tornado
 
 RUN mkdir /lpp-client
 COPY --from=lpp_builder /app/docker_build/example-* /lpp-client/
-COPY --from=rtklib_builder /RTKLIB/bin/* /usr/local/bin/
+COPY --from=rtklib_builder /RTKLIB/bin/rtkrcv /usr/local/bin/
+COPY --from=rtklib_builder /RTKLIB/bin/str2str /usr/local/bin/
 
 COPY ./*.py /lpp-client/
 COPY ./rtklib.conf /lpp-client/
