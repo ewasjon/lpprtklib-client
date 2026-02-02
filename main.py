@@ -286,6 +286,33 @@ def un_thread_server(cs_path="/status/rtk/nmea", tcp_clients=[], log_messages=Tr
                                     data = handle_nmea(line, data=data, cs_path=cs_path, override_gps=override_gps, location_output=location_output)
                             handle_nmea_tcp(line, tcp_clients)
 
+def location_thread_server(override_gps=False):
+    """Thread for reading location JSON from separate unix socket"""
+    socket_path = "/tmp/location.sock"
+    if os.path.exists(socket_path):
+        os.unlink(socket_path)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_socket:
+        unix_socket.bind(socket_path)
+        unix_socket.listen(1)
+        while True:
+            client_socket, addr = unix_socket.accept()
+            with client_socket:
+                buffer = ""
+                while True:
+                    chunk = client_socket.recv(8192)
+                    try:
+                        chunk = chunk.decode()
+                    except UnicodeDecodeError:
+                        logger.error(f"failed decoding location chunk as utf-8 {chunk}")
+                        chunk = None
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    while '\r\n' in buffer:
+                        line, buffer = buffer.split('\r\n', 1)
+                        if line and line.startswith('{'):
+                            handle_location(line, override_gps)
+
 def tcp_server_thread(port, tcp_clients):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_socket:
         tcp_socket.bind(('0.0.0.0', port))
@@ -462,31 +489,34 @@ def build_v4_command(params, cellular):
     input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
     
     # Send raw GNSS observations (UBX) to RTKLIB and RTCM corrections to both serial and RTKLIB
-    rtklib_obs_output = "--output tcp-server:port=20000,format=ubx"
-    rtklib_rtcm_output = "--output tcp-server:port=5432,format=rtcm"
+    rtklib_obs_output = "--output tcp-server:host=localhost,port=20000,format=ubx"
+    rtklib_rtcm_output = "--output tcp-server:host=localhost,port=5432,format=rtcm"
     rtklib_nmea_input = "--input tcp-client:host=localhost,port=5433,format=nmea"
     serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
     
     # Output configuration for CS path
+    outputs = []
     if params["output"].startswith("un"):
-        export_param = "--output tcp-client:path=/tmp/nmea.sock,format=nmea"
+        outputs.append("--output tcp-client:path=/tmp/nmea.sock,format=nmea")
         if params["location_output"]:
-            export_param += " --output tcp-client:path=/tmp/nmea.sock,format=location"
+            outputs.append("--output tcp-client:path=/tmp/location.sock,format=location")
     elif params["output"].startswith("tcp-server:"):
         _, ip, port = params["output"]
-        export_param = f"--output tcp-server:host={ip},port={port},format=nmea"
+        outputs.append(f"--output tcp-server:host={ip},port={port},format=nmea")
         if params["location_output"]:
-            export_param += f" --output tcp-server:host={ip},port={port},format=location"
+            outputs.append(f"--output tcp-server:host={ip},port={port},format=location")
     elif params["output"].startswith("tcp-client:"):
         _, ip, port = params["output"]
-        export_param = f"--output tcp-client:host={ip},port={port},format=nmea"
+        outputs.append(f"--output tcp-client:host={ip},port={port},format=nmea")
         if params["location_output"]:
-            export_param += f" --output tcp-client:host={ip},port={port},format=location"
+            outputs.append(f"--output tcp-client:host={ip},port={port},format=location")
     else:
         ip, port = params['output'].split(':')
-        export_param = f"--output tcp-client:host={ip},port={port},format=nmea"
+        outputs.append(f"--output tcp-client:host={ip},port={port},format=nmea")
         if params["location_output"]:
-            export_param += f" --output tcp-client:host={ip},port={port},format=location"
+            outputs.append(f"--output tcp-client:host={ip},port={port},format=location")
+    
+    export_param = " ".join(outputs)
     
     control_param = "--input stdin:format=ctrl"
 
@@ -542,6 +572,13 @@ def main():
         un_thread = threading.Thread(target=un_thread_server, args=(params["cs_path"], tcp_clients, params["log_nmea"], params["override_gps"], params["location_output"]))
         un_thread.daemon = True
         un_thread.start()
+        
+        # Start location socket thread if location_output is enabled
+        if params["location_output"]:
+            location_thread = threading.Thread(target=location_thread_server, args=(params["override_gps"],))
+            location_thread.daemon = True
+            location_thread.start()
+        
         if params["output"].startswith("un-tcp"):
             _, port = params["output"].split(":")
             tcp_thread = threading.Thread(target=tcp_server_thread, args=(int(port), tcp_clients))

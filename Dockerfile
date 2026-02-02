@@ -1,14 +1,15 @@
 ARG LPP_VERSION=v4.0.22
+ARG TARGETARCH=arm64
 
-FROM ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS lpp_builder
+FROM --platform=linux/${TARGETARCH} ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS lpp_builder
 
-FROM debian:bookworm-slim AS rtklib_builder
+FROM --platform=linux/${TARGETARCH} debian:bookworm-slim AS rtklib_builder
 RUN apt-get update && apt-get install -y git cmake build-essential liblapack-dev libblas-dev && rm -rf /var/lib/apt/lists/*
 RUN git clone https://github.com/rtklibexplorer/RTKLIB.git /RTKLIB
 WORKDIR /RTKLIB
 RUN mkdir build && cd build && cmake -DBUILD_TEST=OFF .. && make
 
-FROM python:3-slim-bookworm
+FROM --platform=linux/${TARGETARCH} python:3-slim-bookworm
 
 ARG LPP_VERSION
 ARG LPP_CLIENT_CONTAINER_VERSION=0.0.0

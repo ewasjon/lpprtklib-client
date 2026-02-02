@@ -107,17 +107,22 @@ For more detailed information about the implementation, please refer to the `mai
 
 
 ## Building and SDK
-To build this repository into a container image, run a command similar to below. Pay special attention to the architecture of the platform you are building for (linux/arm64). For more information on building for different platforms, see the [Docker documentation](https://docs.docker.com/desktop/multi-arch/).
-
+To build this repository into a container image for Cradlepoint devices (ARM64), run:
 
 ```bash
-docker build --platform=linux/arm64 -t lpp-client .
+docker build -t lpp-client .
 ```
 
-The lpp-client.tar.gz SDK version can be downloaded from the releases page. It can also be retrieved from the container image itself. Pay special care to run the correct platform (linux/arm64):
+The Dockerfile defaults to ARM64 architecture. If you need to build for a different platform, specify it explicitly:
 
 ```bash
-docker run --platform=linux/arm64 --rm ghcr.io/ewasjon/lpprtklib-client:latest cat /lpp-client.tar.gz > lpp-client.tar.gz
+docker build --platform=linux/amd64 -t lpp-client .
+```
+
+The lpp-client.tar.gz SDK version can be downloaded from the releases page. It can also be retrieved from the container image itself:
+
+```bash
+docker run --rm lpp-client cat /lpp-client.tar.gz > lpp-client.tar.gz
 ```
 
 For more information on running SDK apps on Cradlepoint endpoints see the [SDK documentation](https://docs.cradlepoint.com/r/NetCloud-Manager-Tools-Tab/SDK).
