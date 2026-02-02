@@ -236,6 +236,12 @@ def get_cmd_params():
         elif log_nmea_value.lower() in ["false", "no", "n"]:
             log_nmea = False
 
+    enable_rtklib = False
+    enable_rtklib_value = get_appdata("lpp-client.enable_rtklib")
+    if enable_rtklib_value is not None:
+        if enable_rtklib_value.lower() in ["true", "yes", "y"]:
+            enable_rtklib = True
+
     return {
         "host": host,
         "port": port,
@@ -253,6 +259,7 @@ def get_cmd_params():
         "tokoro_flags": tokoro_flags,
         "spartn_flags": spartn_flags,
         "log_nmea": log_nmea,
+        "enable_rtklib": enable_rtklib,
     }
 
 def build_v4_command(params, cellular):
@@ -355,17 +362,21 @@ def main():
     logger.info(cmd)
     lpp_program = RunProgram(cmd)
 
-    # Start RTKLIB rtkrcv with config file
-    rtklib_cmd = "rtkrcv -o /lpp-client/rtklib.conf"
-    logger.info(f"RTKLIB command: {rtklib_cmd}")
-    rtklib_program = RunProgram(rtklib_cmd)
+    # Start RTKLIB rtkrcv with config file if enabled
+    rtklib_program = None
+    if params["enable_rtklib"]:
+        rtklib_cmd = "rtkrcv -o /lpp-client/rtklib.conf"
+        logger.info(f"RTKLIB command: {rtklib_cmd}")
+        rtklib_program = RunProgram(rtklib_cmd)
+    else:
+        logger.info("RTKLIB disabled via config")
 
     # Create a control thread to handle user input (e.g., stopping the program)
     def control_thread(lpp_program, rtklib_program, current_params, current_cellular):
         logger.info("Periodically checking for changes")
         while True:
             time.sleep(10)
-            if lpp_program.process is None or rtklib_program.process is None:
+            if lpp_program.process is None or (rtklib_program and rtklib_program.process is None):
                 logger.info("Program terminated")
                 break
             new_params = get_cmd_params()
@@ -373,7 +384,8 @@ def main():
                 current_params = new_params
                 logger.info("params changed", current_params)
                 lpp_program.interrupt()
-                rtklib_program.quit()
+                if rtklib_program:
+                    rtklib_program.quit()
                 break
             new_cellular = get_cellular_info()
             logger.info(f"cell check: {new_cellular['mnc']},{new_cellular['mcc']},{new_cellular['tac']},{new_cellular['cell_id']},{new_cellular["nr"]} == {current_cellular['mnc']},{current_cellular['mcc']},{current_cellular['tac']},{current_cellular['cell_id']},{current_cellular["nr"]}")
@@ -394,8 +406,9 @@ def main():
     lpp_thread = threading.Thread(target=lpp_program.start)
     lpp_thread.start()
     
-    rtklib_thread = threading.Thread(target=rtklib_program.start)
-    rtklib_thread.start()
+    if rtklib_program:
+        rtklib_thread = threading.Thread(target=rtklib_program.start)
+        rtklib_thread.start()
 
     ct.join()
 
