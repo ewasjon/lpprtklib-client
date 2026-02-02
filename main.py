@@ -74,7 +74,82 @@ class RunProgram:
         finally:
             self.process = None
 
-def handle_nmea(nmea, data=None, cs_path="/status/rtk/nmea"):
+def parse_nmea_gga(nmea):
+    """Parse GPGGA sentence and return fix data in Cradlepoint format"""
+    try:
+        parts = nmea.split(',')
+        if not parts[0].endswith('GGA') or len(parts) < 15:
+            return None
+        
+        # Extract time (HHMMSS.sss)
+        time_str = parts[1]
+        if time_str:
+            time_val = float(time_str[:2]) * 3600 + float(time_str[2:4]) * 60 + float(time_str[4:])
+        else:
+            time_val = 0
+        
+        # Extract latitude (DDMM.MMMM)
+        lat_str = parts[2]
+        lat_dir = parts[3]
+        if lat_str and lat_dir:
+            lat_deg = int(lat_str[:2])
+            lat_min_full = float(lat_str[2:])
+            lat_min = int(lat_min_full)
+            lat_sec = (lat_min_full - lat_min) * 60
+            if lat_dir == 'S':
+                lat_deg = -lat_deg
+        else:
+            return None
+        
+        # Extract longitude (DDDMM.MMMM)
+        lon_str = parts[4]
+        lon_dir = parts[5]
+        if lon_str and lon_dir:
+            lon_deg = int(lon_str[:3])
+            lon_min_full = float(lon_str[3:])
+            lon_min = int(lon_min_full)
+            lon_sec = (lon_min_full - lon_min) * 60
+            if lon_dir == 'W':
+                lon_deg = -lon_deg
+        else:
+            return None
+        
+        # Quality and satellites
+        quality = int(parts[6]) if parts[6] else 0
+        satellites = int(parts[7]) if parts[7] else 0
+        
+        # HDOP (horizontal dilution of precision)
+        hdop = float(parts[8]) if parts[8] else 0
+        
+        # Altitude
+        altitude = float(parts[9]) if parts[9] else 0
+        
+        return {
+            "accuracy": hdop,
+            "age": 0.0,
+            "altitude_meters": altitude,
+            "from_sentence": "GPGGA",
+            "ground_speed_knots": 0.0,
+            "heading": None,
+            "latitude": {
+                "degree": lat_deg,
+                "minute": lat_min,
+                "second": lat_sec
+            },
+            "lock": quality > 0,
+            "longitude": {
+                "degree": lon_deg,
+                "minute": lon_min,
+                "second": lon_sec
+            },
+            "satellites": satellites,
+            "time": time_val
+        }
+    except Exception as e:
+        logger.error(f"Failed to parse NMEA GGA: {e}")
+        return None
+
+def handle_nmea(nmea, data=None, cs_path="/status/rtk/nmea", override_gps=False, location_output=False):
     if data is None:
         data = {}
     t = time.time()
@@ -83,7 +158,87 @@ def handle_nmea(nmea, data=None, cs_path="/status/rtk/nmea"):
     data[t] = nmea
     cs_data = list(data.values())
     cs_put(cs_path, cs_data)
+    
+    # Only parse GGA for fix data if location_output is disabled
+    if not location_output and 'GGA' in nmea:
+        fix_data = parse_nmea_gga(nmea)
+        if fix_data:
+            # Always write to /status/gps/rtk
+            cs_put("/status/gps/rtk", fix_data)
+            
+            # Optionally override /status/gps/fix
+            if override_gps:
+                try:
+                    cs_put("/status/gps/fix", fix_data)
+                except Exception as e:
+                    logger.warning(f"Failed to override /status/gps/fix: {e}")
+    
     return data
+
+def handle_location(location_json, override_gps=False):
+    """Handle location format output from S3LC client"""
+    try:
+        location_data = json.loads(location_json)
+        if location_data.get("type") == "location":
+            loc = location_data.get("location", {})
+            
+            # Convert to Cradlepoint GPS fix format
+            lat = loc.get("latitude", 0)
+            lon = loc.get("longitude", 0)
+            alt = loc.get("altitude", 0)
+            
+            lat_deg = int(abs(lat))
+            lat_min_full = (abs(lat) - lat_deg) * 60
+            lat_min = int(lat_min_full)
+            lat_sec = (lat_min_full - lat_min) * 60
+            if lat < 0:
+                lat_deg = -lat_deg
+            
+            lon_deg = int(abs(lon))
+            lon_min_full = (abs(lon) - lon_deg) * 60
+            lon_min = int(lon_min_full)
+            lon_sec = (lon_min_full - lon_min) * 60
+            if lon < 0:
+                lon_deg = -lon_deg
+            
+            h_acc = loc.get("horizontal-accuracy", {})
+            accuracy = h_acc.get("uncertainty-semi-major", 0) if isinstance(h_acc, dict) else 0
+            
+            fix_data = {
+                "accuracy": accuracy,
+                "age": 0.0,
+                "altitude_meters": alt,
+                "from_sentence": "LOCATION",
+                "ground_speed_knots": 0.0,
+                "heading": None,
+                "latitude": {
+                    "degree": lat_deg,
+                    "minute": lat_min,
+                    "second": lat_sec
+                },
+                "lock": True,
+                "longitude": {
+                    "degree": lon_deg,
+                    "minute": lon_min,
+                    "second": lon_sec
+                },
+                "satellites": 0,
+                "time": 0
+            }
+            
+            # Write to /status/gps/rtk
+            cs_put("/status/gps/rtk", fix_data)
+            
+            # Optionally override /status/gps/fix
+            if override_gps:
+                try:
+                    cs_put("/status/gps/fix", fix_data)
+                except Exception as e:
+                    logger.warning(f"Failed to override /status/gps/fix: {e}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse location JSON: {e}")
+    except Exception as e:
+        logger.error(f"Failed to handle location: {e}")
 
 def handle_nmea_tcp(nmea, tcp_clients):
     for client in tcp_clients:
@@ -92,7 +247,7 @@ def handle_nmea_tcp(nmea, tcp_clients):
         except:
             tcp_clients.remove(client)
 
-def un_thread_server(cs_path="/status/rtk/nmea", tcp_clients=[], log_messages=True):
+def un_thread_server(cs_path="/status/rtk/nmea", tcp_clients=[], log_messages=True, override_gps=False, location_output=False):
     """ Thread for reading from unix socket and logging the output"""
     socket_path = "/tmp/nmea.sock"
     data = {}
@@ -118,13 +273,17 @@ def un_thread_server(cs_path="/status/rtk/nmea", tcp_clients=[], log_messages=Tr
                     while '\r\n' in buffer:
                         line, buffer = buffer.split('\r\n', 1)
                         if line:
-                            # check to see if the line starts with $ if not, add it
-                            if line[0] !='$':
-                                line = f'${line}'
-                            if log_messages:
-                                logger.info(line)
-                            if cs_path:
-                                data = handle_nmea(line, data=data, cs_path=cs_path)
+                            # Check if it's JSON location format
+                            if line.startswith('{') and '"type"' in line and '"location"' in line:
+                                handle_location(line, override_gps)
+                            else:
+                                # NMEA format
+                                if line[0] !='$':
+                                    line = f'${line}'
+                                if log_messages:
+                                    logger.info(line)
+                                if cs_path:
+                                    data = handle_nmea(line, data=data, cs_path=cs_path, override_gps=override_gps, location_output=location_output)
                             handle_nmea_tcp(line, tcp_clients)
 
 def tcp_server_thread(port, tcp_clients):
@@ -242,6 +401,18 @@ def get_cmd_params():
         if enable_rtklib_value.lower() in ["true", "yes", "y"]:
             enable_rtklib = True
 
+    override_gps = False
+    override_gps_value = get_appdata("lpp-client.override_gps")
+    if override_gps_value is not None:
+        if override_gps_value.lower() in ["true", "yes", "y"]:
+            override_gps = True
+
+    location_output = False
+    location_output_value = get_appdata("lpp-client.location_output")
+    if location_output_value is not None:
+        if location_output_value.lower() in ["true", "yes", "y"]:
+            location_output = True
+
     return {
         "host": host,
         "port": port,
@@ -260,6 +431,8 @@ def get_cmd_params():
         "spartn_flags": spartn_flags,
         "log_nmea": log_nmea,
         "enable_rtklib": enable_rtklib,
+        "override_gps": override_gps,
+        "location_output": location_output,
     }
 
 def build_v4_command(params, cellular):
@@ -297,15 +470,23 @@ def build_v4_command(params, cellular):
     # Output configuration for CS path
     if params["output"].startswith("un"):
         export_param = "--output tcp-client:path=/tmp/nmea.sock,format=nmea"
+        if params["location_output"]:
+            export_param += " --output tcp-client:path=/tmp/nmea.sock,format=location"
     elif params["output"].startswith("tcp-server:"):
         _, ip, port = params["output"]
         export_param = f"--output tcp-server:host={ip},port={port},format=nmea"
+        if params["location_output"]:
+            export_param += f" --output tcp-server:host={ip},port={port},format=location"
     elif params["output"].startswith("tcp-client:"):
         _, ip, port = params["output"]
         export_param = f"--output tcp-client:host={ip},port={port},format=nmea"
+        if params["location_output"]:
+            export_param += f" --output tcp-client:host={ip},port={port},format=location"
     else:
         ip, port = params['output'].split(':')
         export_param = f"--output tcp-client:host={ip},port={port},format=nmea"
+        if params["location_output"]:
+            export_param += f" --output tcp-client:host={ip},port={port},format=location"
     
     control_param = "--input stdin:format=ctrl"
 
@@ -339,6 +520,17 @@ def main():
     params = get_cmd_params()
     cellular = get_cellular_info()
     logger.info(params)
+    
+    start_time = time.time()
+
+    # Store configuration and start time in config store
+    config_status = {
+        "config": params,
+        "cellular": cellular,
+        "start_time": start_time,
+        "start_time_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time))
+    }
+    cs_put("/status/rtk/config", config_status)
 
     if params["cs_path"] == "/status/rtk/nmea": # the default
         if cs_get("/status/rtk") is None:
@@ -347,7 +539,7 @@ def main():
     tcp_clients=[]
 
     if params["output"].startswith("un"):
-        un_thread = threading.Thread(target=un_thread_server, args=(params["cs_path"], tcp_clients, params["log_nmea"]))
+        un_thread = threading.Thread(target=un_thread_server, args=(params["cs_path"], tcp_clients, params["log_nmea"], params["override_gps"], params["location_output"]))
         un_thread.daemon = True
         un_thread.start()
         if params["output"].startswith("un-tcp"):
