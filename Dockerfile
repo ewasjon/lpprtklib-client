@@ -4,10 +4,14 @@ ARG TARGETARCH=arm64
 FROM --platform=linux/${TARGETARCH} ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS lpp_builder
 
 FROM --platform=linux/${TARGETARCH} debian:bookworm-slim AS rtklib_builder
-RUN apt-get update && apt-get install -y git cmake build-essential liblapack-dev libblas-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git cmake build-essential liblapack-dev libopenblas-dev && rm -rf /var/lib/apt/lists/*
 RUN git clone https://github.com/rtklibexplorer/RTKLIB.git /RTKLIB
 WORKDIR /RTKLIB
-RUN mkdir build && cd build && cmake -DBUILD_TEST=OFF .. && make
+RUN mkdir build && cd build && cmake -DBUILD_SHARED_LIBS=OFF -DBUILD_TEST=OFF \
+    -DCMAKE_C_FLAGS="-DLAPACK" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-lopenblas -llapack" \
+    -DCMAKE_EXE_LINKER_FLAGS="-lopenblas -llapack" \
+    .. && make
 
 FROM --platform=linux/${TARGETARCH} python:3-slim-bookworm
 
@@ -15,13 +19,15 @@ ARG LPP_VERSION
 ARG LPP_CLIENT_CONTAINER_VERSION=0.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y libssl-dev tini supervisor && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libssl-dev tini supervisor liblapack3 libopenblas0 && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir tornado
 
 RUN mkdir /lpp-client
 COPY --from=lpp_builder /app/docker_build/example-* /lpp-client/
 COPY --from=rtklib_builder /RTKLIB/bin/rtkrcv /usr/local/bin/
 COPY --from=rtklib_builder /RTKLIB/bin/str2str /usr/local/bin/
+COPY --from=rtklib_builder /RTKLIB/lib/librtklib.so /usr/local/lib/
+RUN ldconfig
 
 COPY ./*.py /lpp-client/
 COPY ./rtklib.conf /lpp-client/
