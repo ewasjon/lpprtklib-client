@@ -13,10 +13,11 @@ cs = CSClient("lpp-client", logger=logger)
 MAX_TCP_CONNECTIONS = 5
 
 class RunProgram:
-    def __init__(self, cmd):
+    def __init__(self, cmd, name=None):
         self.cmd = cmd
         self.process = None
         self.output_thread = None
+        self.logger = logging.getLogger(name or __name__)
     
     def quit(self):
         if self.process:
@@ -44,7 +45,7 @@ class RunProgram:
                         break
                     try:
                         for line in iter(self.process.stdout.readline, ''):
-                            logger.info(line.rstrip())
+                            self.logger.info(line.rstrip())
                             if not self.process:
                                 break
                     except UnicodeDecodeError as e:
@@ -62,9 +63,9 @@ class RunProgram:
             remaining_output = self.process.stdout.read()
             if remaining_output:
                 for line in remaining_output.splitlines():
-                    logger.info(line.rstrip())
+                    self.logger.info(line.rstrip())
 
-            logger.info(f"Program exited with return code {return_code}")
+            self.logger.info(f"Program exited with return code {return_code}")
 
             # Return the return code of the program
             return return_code
@@ -423,10 +424,15 @@ def get_cmd_params():
             log_nmea = False
 
     enable_rtklib = False
+    rtklib_mode = "client-first"  # client-first: serial->client->rtklib, rtklib-first: serial->rtklib->client
     enable_rtklib_value = get_appdata("lpp-client.enable_rtklib")
     if enable_rtklib_value is not None:
-        if enable_rtklib_value.lower() in ["true", "yes", "y"]:
+        if enable_rtklib_value.lower() in ["true", "yes", "y", "client-first"]:
             enable_rtklib = True
+            rtklib_mode = "client-first"
+        elif enable_rtklib_value.lower() == "rtklib-first":
+            enable_rtklib = True
+            rtklib_mode = "rtklib-first"
 
     override_gps = False
     override_gps_value = get_appdata("lpp-client.override_gps")
@@ -458,6 +464,7 @@ def get_cmd_params():
         "spartn_flags": spartn_flags,
         "log_nmea": log_nmea,
         "enable_rtklib": enable_rtklib,
+        "rtklib_mode": rtklib_mode,
         "override_gps": override_gps,
         "location_output": location_output,
     }
@@ -488,16 +495,28 @@ def build_v4_command(params, cellular):
     # RTKLIB outputs (only if enabled)
     rtklib_outputs = []
     if params["enable_rtklib"]:
-        input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
-        rtklib_outputs = [
-            "--output tcp-server:host=localhost,port=5432,format=rtcm",
-            "--output tcp-server:host=localhost,port=20000,format=rtcm",
-            "--input tcp-client:host=localhost,port=5433,format=nmea"
-        ]
+        if params["rtklib_mode"] == "rtklib-first":
+            # rtkrcv reads serial; client gets ephemeris from rtkrcv, sends corrections back
+            input_param = "--input tcp-client:host=127.0.0.1,port=10000,format=rtcm,tags=input"
+            rtklib_outputs = [
+                "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,otags=input",
+                "--input tcp-client:host=127.0.0.1,port=30000,format=nmea",
+                "--tkr-no-glonass",
+            ]
+            serial_rtcm_output = ""
+        else:
+            # client-first: client reads serial, sends measurements+ephemeris and corrections separately
+            input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
+            rtklib_outputs = [
+                "--output tcp-client:host=127.0.0.1,port=10000,format=rtcm,itags=input",
+                "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,otags=input",
+                "--input tcp-client:host=127.0.0.1,port=30000,format=nmea",
+                "--tkr-no-glonass",
+            ]
+            serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
     else:
         input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
-    
-    serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
+        serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
     
     # Output configuration for CS path
     outputs = []
@@ -592,14 +611,39 @@ def main():
     cmd = build_v4_command(params, cellular)
     
     logger.info(cmd)
-    lpp_program = RunProgram(cmd)
+    lpp_program = RunProgram(cmd, name="example-client")
 
     # Start RTKLIB rtkrcv with config file if enabled
     rtklib_program = None
     if params["enable_rtklib"]:
-        rtklib_cmd = "rtkrcv -s -nc -o /lpp-client/rtklib.conf"
+        if params["rtklib_mode"] == "rtklib-first":
+            # Generate conf with serial input and logstr forwarding raw GNSS to client
+            with open("/lpp-client/rtklib.conf", "r") as f:
+                conf = f.read()
+            conf = conf.replace("inpstr1-type       =tcpsvr", "inpstr1-type       =serial")
+            conf = conf.replace("inpstr1-path       =:10000", f"inpstr1-path       ={params['serial']}:{params['baud']}:8:n:1:off")
+            conf = conf.replace("logstr1-type       =off", "logstr1-type       =tcpsvr")
+            conf = conf.replace("logstr1-path       =", "logstr1-path       =:10000")
+            with open("/tmp/rtklib.conf.run", "w") as f:
+                f.write(conf)
+            conf_path = "/tmp/rtklib.conf.run"
+        else:
+            conf_path = "/lpp-client/rtklib.conf"
+        rtklib_cmd = f"rtkrcv -s -nc -t 3 -o {conf_path}"
         logger.info(f"RTKLIB command: {rtklib_cmd}")
-        rtklib_program = RunProgram(rtklib_cmd)
+        rtklib_program = RunProgram(rtklib_cmd, name="rtkrcv")
+        def rtklib_watchdog():
+            while rtklib_program:
+                rtklib_program.start()
+                if rtklib_program.process is None:
+                    break
+                logger.warning("rtkrcv exited, restarting in 2s...")
+                time.sleep(2)
+
+        rtklib_thread = threading.Thread(target=rtklib_watchdog)
+        rtklib_thread.daemon = True
+        rtklib_thread.start()
+        time.sleep(2)
     else:
         logger.info("RTKLIB disabled via config")
 
@@ -608,8 +652,8 @@ def main():
         logger.info("Periodically checking for changes")
         while True:
             time.sleep(10)
-            if lpp_program.process is None or (rtklib_program and rtklib_program.process is None):
-                logger.info("Program terminated")
+            if lpp_program.process is None:
+                logger.info("example-client terminated")
                 break
             new_params = get_cmd_params()
             if new_params != current_params:
@@ -637,10 +681,6 @@ def main():
     # Start both programs
     lpp_thread = threading.Thread(target=lpp_program.start)
     lpp_thread.start()
-    
-    if rtklib_program:
-        rtklib_thread = threading.Thread(target=rtklib_program.start)
-        rtklib_thread.start()
 
     ct.join()
 
