@@ -4,6 +4,7 @@ import threading
 import subprocess
 import shlex
 import os
+import logging
 
 from logger_config import logger
 
