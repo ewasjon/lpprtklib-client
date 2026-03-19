@@ -597,7 +597,7 @@ def main():
     # Start RTKLIB rtkrcv with config file if enabled
     rtklib_program = None
     if params["enable_rtklib"]:
-        rtklib_cmd = "rtkrcv -o /lpp-client/rtklib.conf"
+        rtklib_cmd = "rtkrcv -s -nc -o /lpp-client/rtklib.conf"
         logger.info(f"RTKLIB command: {rtklib_cmd}")
         rtklib_program = RunProgram(rtklib_cmd)
     else:
