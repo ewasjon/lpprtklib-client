@@ -4,7 +4,6 @@ import threading
 import subprocess
 import shlex
 import os
-import logging
 
 from logger_config import logger
 
@@ -18,7 +17,10 @@ class RunProgram:
         self.cmd = cmd
         self.process = None
         self.output_thread = None
-        self.logger = logging.getLogger(name or __name__)
+        self.name = name or "program"
+
+    def _log(self, msg):
+        logger.info(f"[{self.name}] {msg}")
     
     def quit(self):
         if self.process:
@@ -46,7 +48,7 @@ class RunProgram:
                         break
                     try:
                         for line in iter(self.process.stdout.readline, ''):
-                            self.logger.info(line.rstrip())
+                            self._log(line.rstrip())
                             if not self.process:
                                 break
                     except UnicodeDecodeError as e:
@@ -64,9 +66,9 @@ class RunProgram:
             remaining_output = self.process.stdout.read()
             if remaining_output:
                 for line in remaining_output.splitlines():
-                    self.logger.info(line.rstrip())
+                    self._log(line.rstrip())
 
-            self.logger.info(f"Program exited with return code {return_code}")
+            self._log(f"Program exited with return code {return_code}")
 
             # Return the return code of the program
             return return_code
