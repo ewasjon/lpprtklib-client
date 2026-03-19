@@ -16,7 +16,7 @@ env:
 # There is a single job in this workflow. It's configured to run on the latest available version of Ubuntu.
 jobs:
   build-and-push-image:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04-arm64
     strategy:
       matrix:
         version: ["v4.0.22"] # Only v4 is supported
@@ -34,10 +34,6 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          image: tonistiigi/binfmt:master
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
@@ -47,6 +43,7 @@ jobs:
         run: |
           LPP_VERSION="${{ matrix.version }}"
           echo "LPP_VERSION=$LPP_VERSION" >> $GITHUB_OUTPUT
+          echo "ARTIFACT_IMAGE_TAG=${{ env.IMAGE_TAG }}-$LPP_VERSION" >> $GITHUB_OUTPUT
                 
           # Set image tags
           TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-$LPP_VERSION"
@@ -71,15 +68,10 @@ jobs:
             LPP_CLIENT_CONTAINER_VERSION=${{ env.IMAGE_TAG }}
 
       # Extract and upload ARM64 artifact
-      - name: Pull ARM64 SDK Image
-        run: |
-          docker pull --platform=linux/arm64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-${{ matrix.version }}
-          echo "ARTIFACT_IMAGE_TAG=${{ env.IMAGE_TAG }}-${{ matrix.version }}" >> $GITHUB_ENV
-
       - name: Extract ARM64 Artifact
         id: extract-arm64
         run: |
-          docker run --platform=linux/arm64 --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.ARTIFACT_IMAGE_TAG }} cat /lpp-client.tar.gz > lpp-client-${{ matrix.version }}.tar.gz
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.ARTIFACT_IMAGE_TAG }} cat /lpp-client.tar.gz > lpp-client-${{ matrix.version }}.tar.gz
 
       - name: Upload ARM64 Artifact
         uses: softprops/action-gh-release@v2

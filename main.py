@@ -485,13 +485,18 @@ def build_v4_command(params, cellular):
     else:
         identity_param = f"--imsi {cellular['imsi']}"
     
-    # Input/Output configuration
-    input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
+    # RTKLIB outputs (only if enabled)
+    rtklib_outputs = []
+    if params["enable_rtklib"]:
+        input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
+        rtklib_outputs = [
+            "--output tcp-server:host=localhost,port=5432,format=rtcm",
+            "--output tcp-server:host=localhost,port=20000,format=rtcm",
+            "--input tcp-client:host=localhost,port=5433,format=nmea"
+        ]
+    else:
+        input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
     
-    # Send raw GNSS observations (UBX) to RTKLIB and RTCM corrections to both serial and RTKLIB
-    rtklib_obs_output = "--output tcp-server:host=localhost,port=20000,format=ubx"
-    rtklib_rtcm_output = "--output tcp-server:host=localhost,port=5432,format=rtcm"
-    rtklib_nmea_input = "--input tcp-client:host=localhost,port=5433,format=nmea"
     serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
     
     # Output configuration for CS path
@@ -534,9 +539,7 @@ def build_v4_command(params, cellular):
         f"{identity_param} "
         f"{input_param} "
         f"{serial_rtcm_output} "
-        f"{rtklib_obs_output} "
-        f"{rtklib_rtcm_output} "
-        f"{rtklib_nmea_input} "
+        f"{' '.join(rtklib_outputs)} "
         f"{export_param} "
         f"{control_param} "
         f"{ad_type} "
