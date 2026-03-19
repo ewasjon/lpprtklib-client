@@ -9,8 +9,7 @@ RUN git clone https://github.com/rtklibexplorer/RTKLIB.git /RTKLIB
 WORKDIR /RTKLIB
 RUN mkdir build && cd build && cmake -DBUILD_SHARED_LIBS=OFF -DBUILD_TEST=OFF \
     -DCMAKE_C_FLAGS="-DLAPACK" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-lopenblas -llapack" \
-    -DCMAKE_EXE_LINKER_FLAGS="-lopenblas -llapack" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-as-needed -lopenblas -llapack" \
     .. && make
 
 FROM --platform=linux/${TARGETARCH} python:3-slim-bookworm
