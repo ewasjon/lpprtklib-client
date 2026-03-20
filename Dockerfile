@@ -26,6 +26,7 @@ ARG LPP_CLIENT_CONTAINER_VERSION=0.0.0
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     libssl-dev tini supervisor liblapack3 libopenblas0 procps python3 python3-pip \
+    && ln -s /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages tornado pyserial
 RUN mkdir /lpp-client
