@@ -1,7 +1,12 @@
-ARG LPP_VERSION=v4.0.22
+ARG LPP_VERSION=v4.0.23-debug
+ARG LPP_IMAGE=ghcr.io/ericsson/supl-3gpp-lpp-client/client/aarch64-unknown-linux-gnu
+# LPP_BINARY: path to the client binary inside the lpp_builder image
+# - ghcr.io/ericsson/supl-3gpp-lpp-client:vX.Y.Z  → /app/docker_build/example-client
+# - ghcr.io/.../client/aarch64-...:vX.Y.Z-debug    → /usr/local/bin/entrypoint
+ARG LPP_BINARY=/usr/local/bin/entrypoint
 ARG TARGETARCH=arm64
 
-FROM --platform=linux/${TARGETARCH} ghcr.io/ericsson/supl-3gpp-lpp-client:${LPP_VERSION} AS lpp_builder
+FROM --platform=linux/${TARGETARCH} ${LPP_IMAGE}:${LPP_VERSION} AS lpp_builder
 
 FROM --platform=linux/${TARGETARCH} debian:bookworm-slim AS rtklib_builder
 RUN apt-get update && apt-get install -y git cmake build-essential liblapack-dev libopenblas-dev && rm -rf /var/lib/apt/lists/*
@@ -15,14 +20,15 @@ RUN mkdir build && cd build && cmake -DBUILD_SHARED_LIBS=OFF -DBUILD_TEST=OFF \
 FROM --platform=linux/${TARGETARCH} python:3-slim-bookworm
 
 ARG LPP_VERSION
+ARG LPP_BINARY
 ARG LPP_CLIENT_CONTAINER_VERSION=0.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y libssl-dev tini supervisor liblapack3 libopenblas0 && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir tornado
+RUN apt-get update && apt-get install -y libssl-dev tini supervisor liblapack3 libopenblas0 procps && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir tornado pyserial
 
 RUN mkdir /lpp-client
-COPY --from=lpp_builder /app/docker_build/example-* /lpp-client/
+COPY --from=lpp_builder ${LPP_BINARY} /lpp-client/example-client
 COPY --from=rtklib_builder /RTKLIB/bin/rtkrcv /usr/local/bin/
 COPY --from=rtklib_builder /RTKLIB/bin/str2str /usr/local/bin/
 COPY --from=rtklib_builder /RTKLIB/lib/librtklib.so /usr/local/lib/
@@ -46,7 +52,7 @@ RUN version_minor=$(echo ${LPP_CLIENT_CONTAINER_VERSION} | cut -d'.' -f2) && \
 COPY <<EOF /lpp-client/.env
 LPP_VERSION=${LPP_VERSION}
 LPP_CLIENT_CONTAINER_VERSION=${LPP_CLIENT_CONTAINER_VERSION}
-WEBAPP=true
+WEBAPP=false
 EOF
 
 RUN python3 /package_application.py lpp-client
