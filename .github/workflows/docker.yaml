@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        version: ["v4.0.22"] # Only v4 is supported
+        version: ["v4.0.23-debug"] # Only v4 is supported
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: write
@@ -69,6 +69,8 @@ jobs:
           platforms: linux/arm64
           build-args: |
             LPP_VERSION=${{ steps.vars.outputs.LPP_VERSION }}
+            LPP_IMAGE=ghcr.io/ericsson/supl-3gpp-lpp-client/client/aarch64-unknown-linux-gnu
+            LPP_BINARY=/usr/local/bin/entrypoint
             LPP_CLIENT_CONTAINER_VERSION=${{ env.IMAGE_TAG }}
 
       # Extract and upload ARM64 artifact

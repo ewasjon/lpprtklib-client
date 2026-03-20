@@ -1,8 +1,8 @@
 ARG LPP_VERSION=v4.0.23-debug
 ARG LPP_IMAGE=ghcr.io/ericsson/supl-3gpp-lpp-client/client/aarch64-unknown-linux-gnu
 # LPP_BINARY: path to the client binary inside the lpp_builder image
-# - ghcr.io/ericsson/supl-3gpp-lpp-client:vX.Y.Z  → /app/docker_build/example-client
-# - ghcr.io/.../client/aarch64-...:vX.Y.Z-debug    → /usr/local/bin/entrypoint
+# - ghcr.io/ericsson/supl-3gpp-lpp-client:vX.Y.Z         → /app/docker_build/example-client
+# - ghcr.io/.../client/aarch64-...:vX.Y.Z-debug           → /usr/local/bin/entrypoint
 ARG LPP_BINARY=/usr/local/bin/entrypoint
 ARG TARGETARCH=arm64
 
@@ -17,16 +17,17 @@ RUN mkdir build && cd build && cmake -DBUILD_SHARED_LIBS=OFF -DBUILD_TEST=OFF \
     -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-as-needed -lopenblas -llapack" \
     .. && make
 
-FROM --platform=linux/${TARGETARCH} python:3-slim-bookworm
+FROM --platform=linux/${TARGETARCH} ubuntu:25.04
 
 ARG LPP_VERSION
 ARG LPP_BINARY
 ARG LPP_CLIENT_CONTAINER_VERSION=0.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y libssl-dev tini supervisor liblapack3 libopenblas0 procps && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir tornado pyserial
-
+RUN apt-get update && apt-get install -y \
+    libssl-dev tini supervisor liblapack3 libopenblas0 procps python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --break-system-packages tornado pyserial
 RUN mkdir /lpp-client
 COPY --from=lpp_builder ${LPP_BINARY} /lpp-client/example-client
 COPY --from=rtklib_builder /RTKLIB/bin/rtkrcv /usr/local/bin/
