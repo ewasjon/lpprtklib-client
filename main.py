@@ -632,15 +632,15 @@ def main():
             conf_path = "/tmp/rtklib.conf.run"
         else:
             conf_path = "/lpp-client/rtklib.conf"
-        rtklib_cmd = f"rtkrcv -s -nc -t 3 -o {conf_path}"
+        rtklib_cmd = f"rtkrcv -s -nc -t 3 -p 9000 -o {conf_path}"
         logger.info(f"RTKLIB command: {rtklib_cmd}")
         rtklib_program = RunProgram(rtklib_cmd, name="rtkrcv")
         def rtklib_watchdog():
-            while rtklib_program:
+            while True:
+                logger.info("rtkrcv starting...")
                 rtklib_program.start()
-                if rtklib_program.process is None:
-                    break
                 logger.warning("rtkrcv exited, restarting in 2s...")
+                time.sleep(2)
                 time.sleep(2)
 
         rtklib_thread = threading.Thread(target=rtklib_watchdog)
