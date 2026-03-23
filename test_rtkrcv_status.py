@@ -2,7 +2,7 @@
 """Query rtkrcv status via its telnet console on port 9000."""
 import socket, time
 
-HOST, PORT, PASSWD = "127.0.0.1", 9000, "admin"
+HOST, PORT, PASSWD = "127.0.0.1", 29000, "admin"
 
 COMMANDS = ["status", "stream", "satellite", "observ", "navidata", "error"]
 
@@ -39,6 +39,6 @@ try:
 
     s.close()
 except ConnectionRefusedError:
-    print("ERROR: rtkrcv console not available on port 9000 (is rtkrcv running with -p 9000?)")
+    print("ERROR: rtkrcv console not available on port 29000 (is rtkrcv running with -p 29000?)")
 except socket.timeout:
     print("ERROR: timeout connecting to rtkrcv console")

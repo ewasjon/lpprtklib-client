@@ -24,7 +24,11 @@ class RunProgram:
     
     def quit(self):
         if self.process:
-            self.process.kill()
+            try:
+                self.process.kill()
+                self.process.wait(timeout=5)
+            except Exception:
+                pass
             self.process = None
 
     def interrupt(self):
@@ -632,16 +636,16 @@ def main():
             conf_path = "/tmp/rtklib.conf.run"
         else:
             conf_path = "/lpp-client/rtklib.conf"
-        rtklib_cmd = f"rtkrcv -s -nc -t 3 -p 9000 -o {conf_path}"
+        rtklib_cmd = f"rtkrcv -s -nc -t 3 -p 29000 -o {conf_path}"
         logger.info(f"RTKLIB command: {rtklib_cmd}")
         rtklib_program = RunProgram(rtklib_cmd, name="rtkrcv")
         def rtklib_watchdog():
             while True:
                 logger.info("rtkrcv starting...")
                 rtklib_program.start()
-                logger.warning("rtkrcv exited, restarting in 2s...")
-                time.sleep(2)
-                time.sleep(2)
+                logger.warning("rtkrcv exited, restarting in 5s...")
+                rtklib_program.quit()
+                time.sleep(5)
 
         rtklib_thread = threading.Thread(target=rtklib_watchdog)
         rtklib_thread.daemon = True
