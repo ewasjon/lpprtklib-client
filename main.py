@@ -1,3 +1,4 @@
+import json
 import socket
 import time
 import threading
@@ -46,7 +47,7 @@ class RunProgram:
             self.process = subprocess.Popen(shlex.split(self.cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=0)
 
             # Create a thread to read and print the program's output
-            def output_thread():
+            def _read_output():
                 while True:
                     if not self.process:
                         break
@@ -59,7 +60,7 @@ class RunProgram:
                         logger.error(f"bad output: {e}")
                         continue
 
-            output_thread = threading.Thread(target=output_thread)
+            output_thread = threading.Thread(target=_read_output)
             output_thread.daemon = True
             output_thread.start()
 
@@ -249,9 +250,9 @@ def handle_location(location_json, override_gps=False):
         logger.error(f"Failed to handle location: {e}")
 
 def handle_nmea_tcp(nmea, tcp_clients):
-    for client in tcp_clients:
+    for client in list(tcp_clients):
         try:
-            client.sendall((nmea+ '\r\n').encode())
+            client.sendall((nmea + '\r\n').encode())
         except:
             tcp_clients.remove(client)
 
@@ -332,20 +333,18 @@ def tcp_server_thread(port, tcp_clients):
             tcp_clients.append(client_socket)
 
 def cs_get(path):
+    if not cs.ON_DEVICE:
+        return None
     try:
-        if cs.ON_DEVICE:
-            return cs.get(path)
-        else:
-            raise Exception("Not on device")
+        return cs.get(path)
     except Exception as e:
         logger.error(f"failed getting {path} from CS: {e}")
 
 def cs_put(path, value):
+    if not cs.ON_DEVICE:
+        return None
     try:
-        if cs.ON_DEVICE:
-            return cs.put(path, value)
-        else:
-            raise Exception("Not on device")
+        return cs.put(path, value)
     except Exception as e:
         logger.error(f"failed putting to {path} in CS: {e}")
 
@@ -401,7 +400,7 @@ def get_cmd_params():
     serial = get_appdata("lpp-client.serial") or "/dev/ttyS1"
     baud = get_appdata("lpp-client.baud") or 115200
     output = get_appdata("lpp-client.output") or "un"
-    format = get_appdata("lpp-client.format") or "osr"
+    data_format = get_appdata("lpp-client.format") or "osr"
 
     # mcc, mnc, tac, and cell_id can be statically configured as parsed by get_cellular_info(), 
     # or it could be dynamically updated from the momdem (default).  Additionality the initial params
@@ -460,7 +459,7 @@ def get_cmd_params():
         "baud": baud,
         "output": output,
         "cs_path": cs_path,
-        "format": format,
+        "format": data_format,
         "starting_mcc": starting_mcc,
         "starting_mnc": starting_mnc,
         "starting_tac": starting_tac,
@@ -665,7 +664,7 @@ def main():
             new_params = get_cmd_params()
             if new_params != current_params:
                 current_params = new_params
-                logger.info("params changed", current_params)
+                logger.info(f"params changed: {current_params}")
                 lpp_program.interrupt()
                 if rtklib_program:
                     rtklib_program.quit()

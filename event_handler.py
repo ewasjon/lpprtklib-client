@@ -27,9 +27,9 @@ def main():
     while 1:
         write_stdout('READY\n')
         line = sys.stdin.readline()
-        headers = dict([ x.split(':') for x in line.split() ])
+        headers = dict([x.split(':', 1) for x in line.split()])
         data = sys.stdin.read(int(headers['len']))
-        data = dict([ x.split(':') for x in data.split() ])
+        data = dict([x.split(':', 1) for x in data.split()])
         write_stderr(f"Received headers: {headers}")
         write_stderr(f"Received data: {data}")
 

@@ -106,9 +106,6 @@ class SendLogHandler(tornado.web.RequestHandler):
         msg = self.get_body_argument("msg", default=None)
         if msg is not None:
             logger.info(msg)
-            logger.warning(msg)
-            logger.error(msg)
-            logger.debug(msg)
             self.write("OK")
         else:
             self.set_status(400)
