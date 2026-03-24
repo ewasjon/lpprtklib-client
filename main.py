@@ -1,4 +1,5 @@
 import json
+import glob
 import socket
 import time
 import threading
@@ -322,7 +323,23 @@ def location_thread_server(override_gps=False):
                         if line and line.startswith('{'):
                             handle_location(line, override_gps)
 
-def tcp_server_thread(port, tcp_clients):
+def trace_cleanup_thread(max_mb):
+    max_bytes = max_mb * 1024 * 1024
+    while True:
+        time.sleep(60)
+        try:
+            files = sorted(glob.glob("rtkrcv_*.trace"), key=os.path.getmtime)
+            total = sum(os.path.getsize(f) for f in files)
+            while total > max_bytes and files:
+                oldest = files.pop(0)
+                size = os.path.getsize(oldest)
+                os.remove(oldest)
+                logger.info(f"Removed trace file {oldest} ({size} bytes)")
+                total -= size
+        except Exception as e:
+            logger.error(f"trace cleanup error: {e}")
+
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_socket:
         tcp_socket.bind(('0.0.0.0', port))
         tcp_socket.listen(MAX_TCP_CONNECTIONS)
@@ -452,6 +469,22 @@ def get_cmd_params():
         if location_output_value.lower() in ["true", "yes", "y"]:
             location_output = True
 
+    rtklib_trace = 0
+    rtklib_trace_value = get_appdata("lpp-client.rtklib_trace")
+    if rtklib_trace_value is not None:
+        try:
+            rtklib_trace = int(rtklib_trace_value)
+        except ValueError:
+            pass
+
+    rtklib_trace_max_mb = 10
+    rtklib_trace_max_mb_value = get_appdata("lpp-client.rtklib_trace_size")
+    if rtklib_trace_max_mb_value is not None:
+        try:
+            rtklib_trace_max_mb = int(rtklib_trace_max_mb_value)
+        except ValueError:
+            pass
+
     return {
         "host": host,
         "port": port,
@@ -473,6 +506,8 @@ def get_cmd_params():
         "rtklib_mode": rtklib_mode,
         "override_gps": override_gps,
         "location_output": location_output,
+        "rtklib_trace": rtklib_trace,
+        "rtklib_trace_max_mb": rtklib_trace_max_mb,
     }
 
 def build_v4_command(params, cellular):
@@ -519,7 +554,7 @@ def build_v4_command(params, cellular):
                 "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=input",
                 "--tkr-no-glonass",
             ]
-            serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
+            serial_rtcm_output = ""
     else:
         input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
         serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
@@ -635,7 +670,9 @@ def main():
             conf_path = "/tmp/rtklib.conf.run"
         else:
             conf_path = "/lpp-client/rtklib.conf"
-        rtklib_cmd = f"rtkrcv -s -nc -t 3 -p 29000 -o {conf_path}"
+        rtklib_cmd = f"rtkrcv -s -nc -p 29000 -o {conf_path}"
+        if params["rtklib_trace"] > 0:
+            rtklib_cmd += f" -t {params['rtklib_trace']}"
         logger.info(f"RTKLIB command: {rtklib_cmd}")
         rtklib_program = RunProgram(rtklib_cmd, name="rtkrcv")
         def rtklib_watchdog():
@@ -650,6 +687,11 @@ def main():
         rtklib_thread.daemon = True
         rtklib_thread.start()
         time.sleep(2)
+
+        if params["rtklib_trace"] > 0:
+            cleanup_thread = threading.Thread(target=trace_cleanup_thread, args=(params["rtklib_trace_max_mb"],))
+            cleanup_thread.daemon = True
+            cleanup_thread.start()
     else:
         logger.info("RTKLIB disabled via config")
 
