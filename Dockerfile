@@ -8,14 +8,7 @@ ARG TARGETARCH=arm64
 
 FROM --platform=linux/${TARGETARCH} ${LPP_IMAGE}:${LPP_VERSION} AS lpp_builder
 
-FROM --platform=linux/${TARGETARCH} debian:bookworm-slim AS rtklib_builder
-RUN apt-get update && apt-get install -y git cmake build-essential liblapack-dev libopenblas-dev && rm -rf /var/lib/apt/lists/*
-RUN git clone https://github.com/rtklibexplorer/RTKLIB.git /RTKLIB
-WORKDIR /RTKLIB
-RUN mkdir build && cd build && cmake -DBUILD_SHARED_LIBS=OFF -DBUILD_TEST=OFF \
-    -DCMAKE_C_FLAGS="-DLAPACK" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-as-needed -lopenblas -llapack" \
-    .. && make
+FROM --platform=linux/${TARGETARCH} ghcr.io/ewasjon/rtklib:latest AS rtklib_builder
 
 FROM --platform=linux/${TARGETARCH} ubuntu:25.04
 

@@ -485,6 +485,16 @@ def get_cmd_params():
         except ValueError:
             pass
 
+    rtklib_port = None
+    rtklib_port_value = get_appdata("lpp-client.rtklib_port")
+    if rtklib_port_value is not None:
+        try:
+            rtklib_port = int(rtklib_port_value)
+        except ValueError:
+            pass
+
+    rtklib_flags = get_appdata("lpp-client.rtklib_flags") or ""
+
     return {
         "host": host,
         "port": port,
@@ -508,6 +518,8 @@ def get_cmd_params():
         "location_output": location_output,
         "rtklib_trace": rtklib_trace,
         "rtklib_trace_max_mb": rtklib_trace_max_mb,
+        "rtklib_port": rtklib_port,
+        "rtklib_flags": rtklib_flags,
     }
 
 def build_v4_command(params, cellular):
@@ -670,9 +682,13 @@ def main():
             conf_path = "/tmp/rtklib.conf.run"
         else:
             conf_path = "/lpp-client/rtklib.conf"
-        rtklib_cmd = f"rtkrcv -s -nc -p 29000 -o {conf_path}"
+        rtklib_cmd = f"rtkrcv -s -nc -o {conf_path}"
         if params["rtklib_trace"] > 0:
             rtklib_cmd += f" -t {params['rtklib_trace']}"
+        if params["rtklib_port"]:
+            rtklib_cmd += f" -p {params['rtklib_port']}"
+        if params["rtklib_flags"]:
+            rtklib_cmd += f" {params['rtklib_flags']}"
         logger.info(f"RTKLIB command: {rtklib_cmd}")
         rtklib_program = RunProgram(rtklib_cmd, name="rtkrcv")
         def rtklib_watchdog():
