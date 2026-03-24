@@ -339,7 +339,7 @@ def trace_cleanup_thread(max_mb):
         except Exception as e:
             logger.error(f"trace cleanup error: {e}")
 
-
+def tcp_server_thread(port, tcp_clients):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_socket:
         tcp_socket.bind(('0.0.0.0', port))
         tcp_socket.listen(MAX_TCP_CONNECTIONS)
