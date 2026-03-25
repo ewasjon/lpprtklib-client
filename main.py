@@ -549,53 +549,57 @@ def build_v4_command(params, cellular):
     rtklib_outputs = []
     if params["enable_rtklib"]:
         if params["rtklib_mode"] == "rtklib-first":
-            # rtkrcv reads serial; client gets ephemeris from rtkrcv, sends corrections back
-            input_param = "--input tcp-client:host=127.0.0.1,port=10000,format=rtcm,tags=input,tags=input"
+            # rtkrcv reads serial; client gets raw GNSS from rtkrcv, sends corrections back
+            input_param = "--input tcp-client:host=127.0.0.1,port=10000,format=rtcm,tags=gnss"
             rtklib_outputs = [
-                "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,otags=input",
-                "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=input",
+                "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,itags=corrections",
+                "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=rtk",
                 "--tkr-no-glonass",
+                "--ls-output-tag corrections",
+                "--tkr-output-tag corrections",
             ]
             serial_rtcm_output = ""
         else:
             # client-first: client reads serial, sends measurements+ephemeris and corrections separately
-            input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=rtcm,tags=input"
+            input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx,tags=gnss"
             rtklib_outputs = [
-                "--output tcp-client:host=127.0.0.1,port=10000,format=rtcm,itags=input",
-                "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,otags=input",
-                "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=input",
+                "--output tcp-client:host=127.0.0.1,port=10000,format=rtcm+ubx,itags=gnss",
+                "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,itags=corrections",
+                "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=rtk",
                 "--tkr-no-glonass",
+                "--ls-output-tag corrections",
+                "--tkr-output-tag corrections",
             ]
             serial_rtcm_output = ""
     else:
-        input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx"
+        input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx,tags=gnss"
         serial_rtcm_output = f"--output serial:device={params['serial']},baudrate={params['baud']},format=rtcm"
     
     # Output configuration for CS path
     outputs = []
     if params["output"].startswith("un"):
-        outputs.append("--output tcp-client:path=/tmp/nmea.sock,format=nmea")
+        outputs.append("--output tcp-client:path=/tmp/nmea.sock,format=nmea,itags=gnss+rtk")
         if params["location_output"]:
             outputs.append("--output tcp-client:path=/tmp/location.sock,format=location")
     elif params["output"].startswith("tcp-server:"):
         _, ip, port = params["output"]
-        outputs.append(f"--output tcp-server:host={ip},port={port},format=nmea")
+        outputs.append(f"--output tcp-server:host={ip},port={port},format=nmea,itags=gnss+rtk")
         if params["location_output"]:
             outputs.append(f"--output tcp-server:host={ip},port={port},format=location")
     elif params["output"].startswith("tcp-client:"):
         _, ip, port = params["output"]
-        outputs.append(f"--output tcp-client:host={ip},port={port},format=nmea")
+        outputs.append(f"--output tcp-client:host={ip},port={port},format=nmea,itags=gnss+rtk")
         if params["location_output"]:
             outputs.append(f"--output tcp-client:host={ip},port={port},format=location")
     else:
         ip, port = params['output'].split(':')
-        outputs.append(f"--output tcp-client:host={ip},port={port},format=nmea")
+        outputs.append(f"--output tcp-client:host={ip},port={port},format=nmea,itags=gnss+rtk")
         if params["location_output"]:
             outputs.append(f"--output tcp-client:host={ip},port={port},format=location")
     
     export_param = " ".join(outputs)
     
-    control_param = "--input stdin:format=ctrl"
+    control_param = "--input stdin:format=ctrl,tags=ctrl"
 
     cmd = (
         f"{app_path} "
