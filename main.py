@@ -561,7 +561,7 @@ def build_v4_command(params, cellular):
             serial_rtcm_output = ""
         else:
             # client-first: client reads serial, sends measurements+ephemeris and corrections separately
-            input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=nmea+ubx,tags=gnss"
+            input_param = f"--input serial:device={params['serial']},baudrate={params['baud']},format=rtcm,tags=gnss"
             rtklib_outputs = [
                 "--output tcp-client:host=127.0.0.1,port=10000,format=rtcm+ubx,itags=gnss",
                 "--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,itags=corrections",
