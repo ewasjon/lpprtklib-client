@@ -495,6 +495,8 @@ def get_cmd_params():
 
     rtklib_flags = get_appdata("lpp-client.rtklib_flags") or ""
 
+    rtklib_corrections = get_appdata("lpp-client.rtklib_corrections") or "ssr"
+
     rtklib_send_corrections = True
     rtklib_send_corrections_value = get_appdata("lpp-client.rtklib_send_corrections")
     if rtklib_send_corrections_value is not None:
@@ -526,6 +528,7 @@ def get_cmd_params():
         "rtklib_trace_max_mb": rtklib_trace_max_mb,
         "rtklib_port": rtklib_port,
         "rtklib_flags": rtklib_flags,
+        "rtklib_corrections": rtklib_corrections,
         "rtklib_send_corrections": rtklib_send_corrections,
     }
 
@@ -540,12 +543,15 @@ def build_v4_command(params, cellular):
     tokoro_flags = params["tokoro_flags"].replace(', ', ' ').split()
     tokoro_flags = ' '.join(f"--{flag.lstrip('-')}" for flag in tokoro_flags)
 
-    # Use tokoro format
-    ad_type = "--ad-type=ssr"
-    processors = ["--tokoro"]
-    additional_flags += " " + tokoro_flags
-    
-    # Identity specification
+    # Corrections mode: ssr (default, via tokoro) or osr (via lpp2rtcm)
+    use_tokoro = params.get("rtklib_corrections", "ssr") != "osr"
+    if use_tokoro:
+        ad_type = "--ad-type=ssr"
+        processors = ["--tokoro"]
+        additional_flags += " " + tokoro_flags
+    else:
+        ad_type = "--ad-type=osr"
+        processors = ["--lpp2rtcm"]    # Identity specification
     identity_param = ""
     if cellular.get('mdn'):
         identity_param = f"--msisdn {cellular['mdn']}"
@@ -561,9 +567,8 @@ def build_v4_command(params, cellular):
             rtklib_outputs = [
                 *(["--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,itags=corrections"] if params["rtklib_send_corrections"] else []),
                 "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=rtk",
-                "--tkr-no-glonass",
+                *(["--tkr-no-glonass", "--tkr-output-tag corrections"] if use_tokoro else ["--l2r-output-tag corrections"]),
                 "--ls-output-tag corrections",
-                "--tkr-output-tag corrections",
             ]
             serial_rtcm_output = ""
         else:
@@ -573,9 +578,8 @@ def build_v4_command(params, cellular):
                 "--output tcp-client:host=127.0.0.1,port=10000,format=rtcm+ubx,itags=gnss",
                 *(["--output tcp-client:host=127.0.0.1,port=40000,format=rtcm,itags=corrections"] if params["rtklib_send_corrections"] else []),
                 "--input tcp-client:host=127.0.0.1,port=30000,format=nmea,tags=rtk",
-                "--tkr-no-glonass",
+                *(["--tkr-no-glonass", "--tkr-output-tag corrections"] if use_tokoro else ["--l2r-output-tag corrections"]),
                 "--ls-output-tag corrections",
-                "--tkr-output-tag corrections",
             ]
             serial_rtcm_output = ""
     else:
@@ -631,6 +635,8 @@ def build_v4_command(params, cellular):
     return cmd
 
 def main():
+    from configure_gnss import configure
+    configure()
     logger.info("Starting lpp client and RTKLIB")
 
     params = get_cmd_params()
